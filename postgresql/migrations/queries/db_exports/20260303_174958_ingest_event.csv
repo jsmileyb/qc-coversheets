@@ -1,2 +1,0 @@
-event_id,qc_udic_id,event_type,event_time,correlation_id,status,attempt_count,first_seen_at,last_seen_at,last_error,created_at,updated_at
-9f7fcf99-e23d-4f09-91ff-2a2cb6f09f6f,3ba9fbba870542b88d05adc7b5eb2ba5,qc_ready,2026-03-03 16:10:00-06,ff0178d3-f2c4-4332-b3ab-e9fce622c41a,processed,1,2026-03-03 17:39:21.775239-06,2026-03-03 17:39:22.482884-06,,2026-03-03 17:39:21.775239-06,2026-03-03 17:39:22.482884-06
