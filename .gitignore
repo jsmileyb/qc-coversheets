@@ -2,7 +2,7 @@
 .admin
 .sql_admin
 apps_process
-postgresql
+
 
 # Environment files
 .env

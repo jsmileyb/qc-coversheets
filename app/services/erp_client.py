@@ -31,15 +31,15 @@ class ErpClient:
         self._base_url = base_url.rstrip("/")
         self._token_url = token_url
         self._stored_procedure = stored_procedure.strip()
-        self._username = username
-        self._password = password
-        self._grant_type = grant_type
-        self._integrated = integrated
-        self._database = database
-        self._refresh_token = refresh_token
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._scope = scope
+        self._username = username.strip()
+        self._password = password.strip()
+        self._grant_type = grant_type.strip()
+        self._integrated = integrated.strip()
+        self._database = database.strip()
+        self._refresh_token = refresh_token.strip()
+        self._client_id = client_id.strip()
+        self._client_secret = client_secret.strip()
+        self._scope = scope.strip()
         self._timeout = timeout_seconds
 
         self._access_token: str | None = None
@@ -48,7 +48,9 @@ class ErpClient:
     async def fetch_qc_payload(self, qc_udic_id: str) -> dict:
         token = await self._get_access_token()
         if not self._stored_procedure:
-            raise HTTPException(status_code=500, detail="ERP_STORED_PROCEDURE is not configured")
+            raise HTTPException(
+                status_code=500, detail="ERP_STORED_PROCEDURE is not configured"
+            )
 
         url = f"{self._base_url}/Utilities/InvokeCustom/{self._stored_procedure}"
         backoff = 0.5
@@ -67,21 +69,31 @@ class ErpClient:
                     )
 
                 if 500 <= response.status_code < 600:
-                    raise HTTPException(status_code=503, detail=f"ERP fetch failed with {response.status_code}")
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"ERP fetch failed with {response.status_code}",
+                    )
 
                 if response.status_code >= 400:
-                    raise HTTPException(status_code=502, detail=f"ERP fetch returned {response.status_code}")
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"ERP fetch returned {response.status_code}",
+                    )
 
                 return self._normalize_fetch_payload(response, qc_udic_id)
             except (httpx.RequestError, httpx.TimeoutException, HTTPException) as exc:
-                retryable = isinstance(exc, (httpx.RequestError, httpx.TimeoutException))
+                retryable = isinstance(
+                    exc, (httpx.RequestError, httpx.TimeoutException)
+                )
                 if isinstance(exc, HTTPException) and exc.status_code == 503:
                     retryable = True
 
                 if attempt == 2 or not retryable:
                     if isinstance(exc, HTTPException):
                         raise exc
-                    raise HTTPException(status_code=503, detail="ERP fetch failed after retries") from exc
+                    raise HTTPException(
+                        status_code=503, detail="ERP fetch failed after retries"
+                    ) from exc
 
                 await asyncio.sleep(backoff)
                 backoff *= 2
@@ -93,8 +105,18 @@ class ErpClient:
         if self._access_token and self._expires_at and now < self._expires_at:
             return self._access_token
 
-        if not all([self._token_url, self._username, self._password, self._client_id, self._client_secret]):
-            raise HTTPException(status_code=500, detail="ERP OAuth settings are incomplete")
+        if not all(
+            [
+                self._token_url,
+                self._username,
+                self._password,
+                self._client_id,
+                self._client_secret,
+            ]
+        ):
+            raise HTTPException(
+                status_code=500, detail="ERP OAuth settings are incomplete"
+            )
 
         payload = {
             "Username": self._username,
@@ -104,11 +126,8 @@ class ErpClient:
             "database": self._database,
             "Client_Id": self._client_id,
             "client_secret": self._client_secret,
+            "refresh_token": self._refresh_token,
         }
-        if self._refresh_token:
-            payload["refresh_token"] = self._refresh_token
-        if self._scope:
-            payload["scope"] = self._scope
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(
@@ -118,20 +137,28 @@ class ErpClient:
             )
 
         if response.status_code >= 400:
-            raise HTTPException(status_code=500, detail="Failed to obtain ERP access token")
+            message = response.text[:1000] if response.text else ""
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to obtain ERP access token ({response.status_code}): {message}",
+            )
 
         token_payload = response.json()
         token = token_payload.get("access_token")
         expires_in = int(token_payload.get("expires_in", 3600))
 
         if not token:
-            raise HTTPException(status_code=500, detail="ERP token response missing access_token")
+            raise HTTPException(
+                status_code=500, detail="ERP token response missing access_token"
+            )
 
         self._access_token = token
         self._expires_at = now + timedelta(seconds=max(60, expires_in - 30))
         return self._access_token
 
-    def _normalize_fetch_payload(self, response: httpx.Response, qc_udic_id: str) -> dict:
+    def _normalize_fetch_payload(
+        self, response: httpx.Response, qc_udic_id: str
+    ) -> dict:
         body: Any
         try:
             body = response.json()
@@ -142,7 +169,9 @@ class ErpClient:
         if xml_text is None:
             if isinstance(body, dict):
                 return body
-            raise HTTPException(status_code=502, detail="ERP fetch payload format is not supported")
+            raise HTTPException(
+                status_code=502, detail="ERP fetch payload format is not supported"
+            )
 
         return self._parse_stored_procedure_xml(xml_text, qc_udic_id)
 
@@ -174,22 +203,30 @@ class ErpClient:
         try:
             root = ElementTree.fromstring(xml_text)
         except ElementTree.ParseError as exc:
-            raise HTTPException(status_code=502, detail="ERP XML payload is invalid") from exc
+            raise HTTPException(
+                status_code=502, detail="ERP XML payload is invalid"
+            ) from exc
 
         table = root.find(".//Table")
         if table is None:
-            raise HTTPException(status_code=502, detail="ERP XML payload missing Table element")
+            raise HTTPException(
+                status_code=502, detail="ERP XML payload missing Table element"
+            )
 
         pep_udic_id = ErpClient._child_text(table, "pepUdicID")
         now_datetime = ErpClient._child_text(table, "NowDateTime")
         qc_records_raw = ErpClient._child_text(table, "qcRecords")
         if not qc_records_raw:
-            raise HTTPException(status_code=502, detail="ERP XML payload missing qcRecords")
+            raise HTTPException(
+                status_code=502, detail="ERP XML payload missing qcRecords"
+            )
 
         try:
             qc_records = json.loads(qc_records_raw)
         except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=502, detail="ERP qcRecords value is not valid JSON") from exc
+            raise HTTPException(
+                status_code=502, detail="ERP qcRecords value is not valid JSON"
+            ) from exc
 
         if isinstance(qc_records, dict):
             records = [qc_records]
@@ -199,7 +236,9 @@ class ErpClient:
             records = []
 
         if not records:
-            raise HTTPException(status_code=502, detail="ERP qcRecords JSON has no records")
+            raise HTTPException(
+                status_code=502, detail="ERP qcRecords JSON has no records"
+            )
 
         expected = expected_qc_udic_id.lower()
         selected = next(
@@ -219,7 +258,9 @@ class ErpClient:
                     disciplines.append(
                         {
                             "erp_discipline_code": str(code).strip().upper(),
-                            "discipline_name": str(name).strip() if name else str(code).strip().upper(),
+                            "discipline_name": (
+                                str(name).strip() if name else str(code).strip().upper()
+                            ),
                         }
                     )
 

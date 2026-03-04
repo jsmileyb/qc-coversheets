@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from datetime import date as dt_date
 from datetime import datetime, timezone
 from typing import Any
 
@@ -243,7 +245,12 @@ class IngestService:
                         "qc_udic_id": request.qcUdicID,
                     }
                     # review_request_event requires review_request_id; only write when one exists for this coversheet.
-                    await conn.execute(INSERT_INGEST_AUDIT_EVENT_SQL, coversheet_id, "ingest_processed", details)
+                    await conn.execute(
+                        INSERT_INGEST_AUDIT_EVENT_SQL,
+                        coversheet_id,
+                        "ingest_processed",
+                        json.dumps(details),
+                    )
                     await conn.execute(MARK_PROCESSED_SQL, request.event_id)
             logger.info("db_upsert_success correlation_id=%s event_id=%s qcUdicID=%s", correlation_id, request.event_id, request.qcUdicID)
         except Exception as exc:  # noqa: BLE001
@@ -268,7 +275,7 @@ class IngestService:
         if not pep_udic_id or not project_wbs:
             raise HTTPException(status_code=422, detail="ERP payload missing required fields: pep_udic_id/project_wbs")
 
-        per_id = await conn.fetchval(UPSERT_PROJECT_EXECUTION_SQL, str(pep_udic_id), now, payload)
+        per_id = await conn.fetchval(UPSERT_PROJECT_EXECUTION_SQL, str(pep_udic_id), now, json.dumps(payload))
 
         project_name = self._pick(payload, "project_name", "projectName")
         market = self._pick(payload, "market")
@@ -292,10 +299,13 @@ class IngestService:
                 name = item.get("name") or code
                 await conn.fetchval(UPSERT_DISCIPLINE_SQL, code, name)
 
-        source_created_at = self._pick(payload, "record_created_date", "recordCreatedDate", "source_created_at")
+        source_created_at_raw = self._pick(payload, "record_created_date", "recordCreatedDate", "source_created_at")
         submittal_name = self._pick(payload, "submittal_name", "submittalName")
-        submittal_date = self._pick(payload, "submittal_date", "submittalDate")
+        submittal_date_raw = self._pick(payload, "submittal_date", "submittalDate")
         client_name = self._pick(payload, "client_name", "clientName")
+
+        source_created_at = self._to_datetime_or_none(source_created_at_raw, "recordCreatedDate")
+        submittal_date = self._to_date_or_none(submittal_date_raw, "submittalDate")
 
         existing_id = await conn.fetchval(SELECT_COVERSHEET_BY_QC_UDIC_SQL, qc_udic_id)
 
@@ -383,3 +393,44 @@ class IngestService:
                 result.append({"code": code_text, "name": str(name).strip()})
 
         return result
+
+    @staticmethod
+    def _to_datetime_or_none(value: Any, field_name: str) -> datetime | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return None
+            try:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Invalid datetime for {field_name}: {value}") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid datetime type for {field_name}")
+
+    @staticmethod
+    def _to_date_or_none(value: Any, field_name: str) -> dt_date | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, dt_date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return None
+            try:
+                if "T" in raw:
+                    return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
+                return dt_date.fromisoformat(raw)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Invalid date for {field_name}: {value}") from exc
+        raise HTTPException(status_code=422, detail=f"Invalid date type for {field_name}")
