@@ -101,12 +101,17 @@ RETURNING id;
 
 UPSERT_CONTACT_SQL = """
 INSERT INTO qc_coversheet.contact (
-    erp_contact_id, email, display_name, last_seen_at, created_at, updated_at
+    erp_contact_id, email, display_name, company_erp_id, erp_company_name, last_seen_at, created_at, updated_at
 )
-VALUES ($1, $2, $3, now(), now(), now())
+VALUES ($1, $2, $3, $4, $5, now(), now(), now())
 ON CONFLICT (erp_contact_id) DO UPDATE
 SET email = COALESCE(EXCLUDED.email, qc_coversheet.contact.email),
     display_name = COALESCE(EXCLUDED.display_name, qc_coversheet.contact.display_name),
+    erp_company_name = COALESCE(EXCLUDED.erp_company_name, qc_coversheet.contact.erp_company_name),
+    company_erp_id = CASE
+        WHEN EXCLUDED.company_erp_id IS NULL AND EXCLUDED.erp_company_name = 'Gresham Smith' THEN NULL
+        ELSE COALESCE(EXCLUDED.company_erp_id, qc_coversheet.contact.company_erp_id)
+    END,
     last_seen_at = now(),
     updated_at = now()
 RETURNING id;
@@ -141,13 +146,14 @@ SET project_execution_record_id = $2,
     submittal_name = $7,
     submittal_date = $8,
     project_name_snapshot = $9,
-    client_name_snapshot = $10,
-    market_snapshot = $11,
-    location_snapshot = $12,
-    pm_name_snapshot = $13,
-    pm_email_snapshot = $14,
-    pp_name_snapshot = $15,
-    pp_email_snapshot = $16,
+    client_id_snapshot = $10,
+    client_name_snapshot = $11,
+    market_snapshot = $12,
+    location_snapshot = $13,
+    pm_name_snapshot = $14,
+    pm_email_snapshot = $15,
+    pp_name_snapshot = $16,
+    pp_email_snapshot = $17,
     updated_at = now()
 WHERE id = $1;
 """
@@ -155,7 +161,7 @@ WHERE id = $1;
 INSERT_COVERSHEET_SQL = """
 INSERT INTO qc_coversheet.qc_coversheet_coversheet (
     project_execution_record_id, project_id, qc_coversheet_udic_id, ingested_at, source_created_at,
-    project_wbs, submittal_name, submittal_date, project_name_snapshot, client_name_snapshot,
+    project_wbs, submittal_name, submittal_date, project_name_snapshot, client_id_snapshot, client_name_snapshot,
     market_snapshot, location_snapshot, pm_name_snapshot, pm_email_snapshot, pp_name_snapshot,
     pp_email_snapshot, updated_at
 )
@@ -163,7 +169,7 @@ VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15,
-    $16, now()
+    $16, $17, now()
 )
 RETURNING id;
 """
@@ -181,7 +187,9 @@ LIMIT 1;
 
 
 class IngestService:
-    def __init__(self, *, erp_client: ErpClient, limiter: ConcurrencyLimiter, ingest_mode: str) -> None:
+    def __init__(
+        self, *, erp_client: ErpClient, limiter: ConcurrencyLimiter, ingest_mode: str
+    ) -> None:
         self._erp_client = erp_client
         self._limiter = limiter
         self._ingest_mode = ingest_mode.lower()
@@ -196,7 +204,12 @@ class IngestService:
         now = datetime.now(timezone.utc)
         event_time = request.event_time or now
 
-        logger.info("trigger_received correlation_id=%s event_id=%s qcUdicID=%s", correlation_id, request.event_id, request.qcUdicID)
+        logger.info(
+            "trigger_received correlation_id=%s event_id=%s qcUdicID=%s",
+            correlation_id,
+            request.event_id,
+            request.qcUdicID,
+        )
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -209,35 +222,74 @@ class IngestService:
             )
 
             if row and row["status"] == "processed":
-                logger.info("processing_complete correlation_id=%s event_id=%s qcUdicID=%s short_circuit=true", correlation_id, request.event_id, request.qcUdicID)
-                return 200, IngestResponse(status="processed", qcUdicID=request.qcUdicID, correlation_id=correlation_id)
+                logger.info(
+                    "processing_complete correlation_id=%s event_id=%s qcUdicID=%s short_circuit=true",
+                    correlation_id,
+                    request.event_id,
+                    request.qcUdicID,
+                )
+                return 200, IngestResponse(
+                    status="processed",
+                    qcUdicID=request.qcUdicID,
+                    correlation_id=correlation_id,
+                )
 
             if self._ingest_mode == "queue":
                 await conn.execute(MARK_PROCESSING_SQL, request.event_id)
-                await conn.execute(UPSERT_INGEST_JOB_SQL, request.qcUdicID, request.event_id)
+                await conn.execute(
+                    UPSERT_INGEST_JOB_SQL, request.qcUdicID, request.event_id
+                )
                 await conn.execute(
                     "UPDATE qc_coversheet.ingest_event SET status='received', last_seen_at=now(), updated_at=now() WHERE event_id=$1",
                     request.event_id,
                 )
-                logger.info("processing_complete correlation_id=%s event_id=%s qcUdicID=%s status=queued", correlation_id, request.event_id, request.qcUdicID)
-                return 202, IngestResponse(status="queued", qcUdicID=request.qcUdicID, correlation_id=correlation_id)
+                logger.info(
+                    "processing_complete correlation_id=%s event_id=%s qcUdicID=%s status=queued",
+                    correlation_id,
+                    request.event_id,
+                    request.qcUdicID,
+                )
+                return 202, IngestResponse(
+                    status="queued",
+                    qcUdicID=request.qcUdicID,
+                    correlation_id=correlation_id,
+                )
 
             await conn.execute(MARK_PROCESSING_SQL, request.event_id)
 
         acquired = await self._limiter.try_acquire()
         if not acquired:
             await self._mark_failed(pool, request.event_id, "Concurrency limit reached")
-            return 429, IngestResponse(status="busy", qcUdicID=request.qcUdicID, correlation_id=correlation_id)
+            return 429, IngestResponse(
+                status="busy", qcUdicID=request.qcUdicID, correlation_id=correlation_id
+            )
 
         try:
-            logger.info("erp_fetch_start correlation_id=%s event_id=%s qcUdicID=%s", correlation_id, request.event_id, request.qcUdicID)
+            logger.info(
+                "erp_fetch_start correlation_id=%s event_id=%s qcUdicID=%s",
+                correlation_id,
+                request.event_id,
+                request.qcUdicID,
+            )
             payload = await self._erp_client.fetch_qc_payload(request.qcUdicID)
-            logger.info("erp_fetch_success correlation_id=%s event_id=%s qcUdicID=%s", correlation_id, request.event_id, request.qcUdicID)
+            logger.info(
+                "erp_fetch_success correlation_id=%s event_id=%s qcUdicID=%s",
+                correlation_id,
+                request.event_id,
+                request.qcUdicID,
+            )
 
-            logger.info("db_upsert_start correlation_id=%s event_id=%s qcUdicID=%s", correlation_id, request.event_id, request.qcUdicID)
+            logger.info(
+                "db_upsert_start correlation_id=%s event_id=%s qcUdicID=%s",
+                correlation_id,
+                request.event_id,
+                request.qcUdicID,
+            )
             async with pool.acquire() as conn:
                 async with conn.transaction():
-                    coversheet_id = await self._upsert_state(conn, request.qcUdicID, payload, now)
+                    coversheet_id = await self._upsert_state(
+                        conn, request.qcUdicID, payload, now
+                    )
                     details = {
                         "event_id": str(request.event_id),
                         "event_type": request.event_type,
@@ -252,46 +304,133 @@ class IngestService:
                         json.dumps(details),
                     )
                     await conn.execute(MARK_PROCESSED_SQL, request.event_id)
-            logger.info("db_upsert_success correlation_id=%s event_id=%s qcUdicID=%s", correlation_id, request.event_id, request.qcUdicID)
+            logger.info(
+                "db_upsert_success correlation_id=%s event_id=%s qcUdicID=%s",
+                correlation_id,
+                request.event_id,
+                request.qcUdicID,
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("db_upsert_failed correlation_id=%s event_id=%s qcUdicID=%s", correlation_id, request.event_id, request.qcUdicID)
+            logger.exception(
+                "db_upsert_failed correlation_id=%s event_id=%s qcUdicID=%s",
+                correlation_id,
+                request.event_id,
+                request.qcUdicID,
+            )
             await self._mark_failed(pool, request.event_id, str(exc))
             if isinstance(exc, HTTPException):
                 raise exc
-            raise HTTPException(status_code=503, detail="Failed to process ingest event") from exc
+            raise HTTPException(
+                status_code=503, detail="Failed to process ingest event"
+            ) from exc
         finally:
             await self._limiter.release()
 
-        logger.info("processing_complete correlation_id=%s event_id=%s qcUdicID=%s", correlation_id, request.event_id, request.qcUdicID)
-        return 200, IngestResponse(status="processed", qcUdicID=request.qcUdicID, correlation_id=correlation_id)
+        logger.info(
+            "processing_complete correlation_id=%s event_id=%s qcUdicID=%s",
+            correlation_id,
+            request.event_id,
+            request.qcUdicID,
+        )
+        return 200, IngestResponse(
+            status="processed", qcUdicID=request.qcUdicID, correlation_id=correlation_id
+        )
 
     async def _mark_failed(self, pool: asyncpg.Pool, event_id: Any, error: str) -> None:
         async with pool.acquire() as conn:
             await conn.execute(MARK_FAILED_SQL, event_id, error[:2000])
 
-    async def _upsert_state(self, conn: asyncpg.Connection, qc_udic_id: str, payload: dict, now: datetime) -> Any:
+    async def _upsert_state(
+        self, conn: asyncpg.Connection, qc_udic_id: str, payload: dict, now: datetime
+    ) -> Any:
         pep_udic_id = self._pick(payload, "pep_udic_id", "pepUdicID", "pepUdicId")
         project_wbs = self._pick(payload, "project_wbs", "projectWbs")
         if not pep_udic_id or not project_wbs:
-            raise HTTPException(status_code=422, detail="ERP payload missing required fields: pep_udic_id/project_wbs")
+            raise HTTPException(
+                status_code=422,
+                detail="ERP payload missing required fields: pep_udic_id/project_wbs",
+            )
 
-        per_id = await conn.fetchval(UPSERT_PROJECT_EXECUTION_SQL, str(pep_udic_id), now, json.dumps(payload))
+        per_id = await conn.fetchval(
+            UPSERT_PROJECT_EXECUTION_SQL, str(pep_udic_id), now, json.dumps(payload)
+        )
 
         project_name = self._pick(payload, "project_name", "projectName")
         market = self._pick(payload, "market")
         location = self._pick(payload, "location", "department")
 
-        project_id = await conn.fetchval(UPSERT_PROJECT_SQL, str(project_wbs), project_name, market, location)
+        project_id = await conn.fetchval(
+            UPSERT_PROJECT_SQL, str(project_wbs), project_name, market, location
+        )
 
         pm_email = self._normalize_email(self._pick(payload, "pm_email", "pmEmail"))
         pm_name = self._pick(payload, "pm_name", "pmName")
         pp_email = self._normalize_email(self._pick(payload, "pp_email", "ppEmail"))
         pp_name = self._pick(payload, "pp_name", "ppName")
+        pm_id = self._pick(payload, "pm_id", "pmID")
+        pp_id = self._pick(payload, "pp_id", "ppID")
 
-        if pm_email:
-            await conn.fetchval(UPSERT_CONTACT_SQL, f"EMAIL:{pm_email}", pm_email, pm_name)
-        if pp_email:
-            await conn.fetchval(UPSERT_CONTACT_SQL, f"EMAIL:{pp_email}", pp_email, pp_name)
+        if pm_id or pm_email:
+            pm_company_erp_id = None
+            pm_company_name = None
+            if pm_email and (
+                pm_email.endswith("@greshamsmith.com")
+                or pm_email.endswith("@gspnet.com")
+            ):
+                pm_company_name = "Gresham Smith"
+            pm_contact_id = str(pm_id).strip() if pm_id else f"EMAIL:{pm_email}"
+            await conn.fetchval(
+                UPSERT_CONTACT_SQL,
+                pm_contact_id,
+                pm_email,
+                pm_name,
+                pm_company_erp_id,
+                pm_company_name,
+            )
+        if pp_id or pp_email:
+            pp_company_erp_id = None
+            pp_company_name = None
+            if pp_email and (
+                pp_email.endswith("@greshamsmith.com")
+                or pp_email.endswith("@gspnet.com")
+            ):
+                pp_company_name = "Gresham Smith"
+            pp_contact_id = str(pp_id).strip() if pp_id else f"EMAIL:{pp_email}"
+            await conn.fetchval(
+                UPSERT_CONTACT_SQL,
+                pp_contact_id,
+                pp_email,
+                pp_name,
+                pp_company_erp_id,
+                pp_company_name,
+            )
+
+        reviewer_data = payload.get("reviewer_data", [])
+        if isinstance(reviewer_data, list):
+            for reviewer in reviewer_data:
+                if not isinstance(reviewer, dict):
+                    continue
+                reviewer_id = reviewer.get("reviewerID")
+                reviewer_email = self._normalize_email(reviewer.get("reviewerEmail"))
+                reviewer_name = reviewer.get("reviewerContactName")
+                reviewer_company_id = reviewer.get("reviewerCompanyID")
+                reviewer_company_name = reviewer.get("reviewerCompany")
+
+                if reviewer_id:
+                    reviewer_contact_id = str(reviewer_id).strip()
+                elif reviewer_email:
+                    reviewer_contact_id = f"EMAIL:{reviewer_email}"
+                else:
+                    continue
+
+                await conn.fetchval(
+                    UPSERT_CONTACT_SQL,
+                    reviewer_contact_id,
+                    reviewer_email,
+                    reviewer_name,
+                    reviewer_company_id,
+                    reviewer_company_name,
+                )
 
         for item in self._extract_disciplines(payload):
             code = item.get("code")
@@ -299,12 +438,17 @@ class IngestService:
                 name = item.get("name") or code
                 await conn.fetchval(UPSERT_DISCIPLINE_SQL, code, name)
 
-        source_created_at_raw = self._pick(payload, "record_created_date", "recordCreatedDate", "source_created_at")
+        source_created_at_raw = self._pick(
+            payload, "record_created_date", "recordCreatedDate", "source_created_at"
+        )
         submittal_name = self._pick(payload, "submittal_name", "submittalName")
         submittal_date_raw = self._pick(payload, "submittal_date", "submittalDate")
+        client_id = self._pick(payload, "client_id", "clientNameID")
         client_name = self._pick(payload, "client_name", "clientName")
 
-        source_created_at = self._to_datetime_or_none(source_created_at_raw, "recordCreatedDate")
+        source_created_at = self._to_datetime_or_none(
+            source_created_at_raw, "recordCreatedDate"
+        )
         submittal_date = self._to_date_or_none(submittal_date_raw, "submittalDate")
 
         existing_id = await conn.fetchval(SELECT_COVERSHEET_BY_QC_UDIC_SQL, qc_udic_id)
@@ -319,6 +463,7 @@ class IngestService:
             submittal_name,
             submittal_date,
             project_name,
+            client_id,
             client_name,
             market,
             location,
@@ -343,6 +488,7 @@ class IngestService:
             submittal_name,
             submittal_date,
             project_name,
+            client_id,
             client_name,
             market,
             location,
@@ -383,7 +529,11 @@ class IngestService:
                 continue
 
             if isinstance(item, dict):
-                code = item.get("erp_discipline_code") or item.get("discipline_code") or item.get("code")
+                code = (
+                    item.get("erp_discipline_code")
+                    or item.get("discipline_code")
+                    or item.get("code")
+                )
                 if not code:
                     continue
                 code_text = str(code).strip().upper()
@@ -412,8 +562,13 @@ class IngestService:
                     parsed = parsed.replace(tzinfo=timezone.utc)
                 return parsed.astimezone(timezone.utc)
             except ValueError as exc:
-                raise HTTPException(status_code=422, detail=f"Invalid datetime for {field_name}: {value}") from exc
-        raise HTTPException(status_code=422, detail=f"Invalid datetime type for {field_name}")
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid datetime for {field_name}: {value}",
+                ) from exc
+        raise HTTPException(
+            status_code=422, detail=f"Invalid datetime type for {field_name}: {value}"
+        )
 
     @staticmethod
     def _to_date_or_none(value: Any, field_name: str) -> dt_date | None:
@@ -432,5 +587,9 @@ class IngestService:
                     return datetime.fromisoformat(raw.replace("Z", "+00:00")).date()
                 return dt_date.fromisoformat(raw)
             except ValueError as exc:
-                raise HTTPException(status_code=422, detail=f"Invalid date for {field_name}: {value}") from exc
-        raise HTTPException(status_code=422, detail=f"Invalid date type for {field_name}")
+                raise HTTPException(
+                    status_code=422, detail=f"Invalid date for {field_name}: {value}"
+                ) from exc
+        raise HTTPException(
+            status_code=422, detail=f"Invalid date type for {field_name}: {value}"
+        )
