@@ -5,7 +5,10 @@ from functools import lru_cache
 from app.security.hmac_verifier import HmacVerifier
 from app.services.concurrency import ConcurrencyLimiter
 from app.services.erp_client import ErpClient
+from app.services.form_template_service import FormTemplateService
 from app.services.ingest_service import IngestService
+from app.services.review_admin_service import ReviewAdminService
+from app.services.review_form_service import ReviewFormService
 from app.settings import get_settings
 
 
@@ -43,3 +46,19 @@ def get_erp_client() -> ErpClient:
 def get_ingest_service() -> IngestService:
     settings = get_settings()
     return IngestService(erp_client=get_erp_client(), limiter=get_limiter(), ingest_mode=settings.ingest_mode)
+
+
+@lru_cache(maxsize=1)
+def get_form_template_service() -> FormTemplateService:
+    return FormTemplateService()
+
+
+@lru_cache(maxsize=1)
+def get_review_form_service() -> ReviewFormService:
+    settings = get_settings()
+    return ReviewFormService(test_mode=settings.test_mode)
+
+
+@lru_cache(maxsize=1)
+def get_review_admin_service() -> ReviewAdminService:
+    return ReviewAdminService()

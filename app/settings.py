@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     ingest_concurrency_limit: int = Field(default=20)
     ingest_mode: str = Field(default="sync")
+    test_mode: bool = Field(default=False)
 
 
 @lru_cache(maxsize=1)
