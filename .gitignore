@@ -1,8 +1,5 @@
 # Admin files
-.admin/**
-!.admin/
-!.admin/fyi/
-!.admin/fyi/**
+.admin.lnk
 
 .sql_admin
 apps_process
