@@ -41,7 +41,7 @@ async def admin_landing_page() -> str:
   </div>
   <div class="card" id="pendingCard" style="display:none;">
     <h3>Welcome</h3>
-    <div id="pendingGreeting">You are signed in, but do not currently have access to this application.</div>
+    <div>You are signed in, but do not currently have access to this application.</div>
     <div style="margin-top:6px;">Please contact an administrator to request access.</div>
     <div style="margin-top:10px;">
       <button type="button" onclick="logout()">Logout</button>
@@ -73,12 +73,6 @@ async def admin_landing_page() -> str:
     const authHint = document.getElementById("authHint");
     const authCard = document.getElementById("authCard");
     const pendingCard = document.getElementById("pendingCard");
-    const pendingGreeting = document.getElementById("pendingGreeting");
-    function firstNameFromMe(me) {
-      const raw = (me?.display_name || "").trim();
-      if (!raw) return "";
-      return raw.split(/\s+/)[0] || "";
-    }
     async function refreshAuth() {
       const response = await fetch("/me");
       const body = await response.json();
@@ -99,20 +93,14 @@ async def admin_landing_page() -> str:
       );
       if (!isAuthenticated) {
         authHint.textContent = "Sign in to access admin/reviewer tools.";
-        pendingGreeting.textContent = "You are signed in, but do not currently have access to this application.";
         authCard.style.display = "block";
         pendingCard.style.display = "none";
       } else if (!isActive) {
-        const firstName = firstNameFromMe(body);
-        pendingGreeting.textContent = firstName
-          ? `Welcome ${firstName}. You are signed in, but do not currently have access to this application.`
-          : "You are signed in, but do not currently have access to this application.";
         authHint.textContent = "";
         authCard.style.display = "none";
         pendingCard.style.display = "block";
       } else {
-        const firstName = firstNameFromMe(body);
-        authHint.textContent = firstName ? `Welcome ${firstName}. Access is active.` : "Access is active.";
+        authHint.textContent = "Access is active.";
         authCard.style.display = "block";
         pendingCard.style.display = "none";
       }
@@ -640,6 +628,13 @@ async def review_form_page() -> str:
       }
       show(body);
     }
+    function loadReviewRequestIdFromQuery() {
+      const params = new URLSearchParams(window.location.search);
+      const fromQuery = params.get("reviewRequestId") || params.get("review_request_id");
+      if (fromQuery) {
+        document.getElementById("reviewRequestId").value = fromQuery.trim();
+      }
+    }
     function stamp(button) {
       const section = button.closest("[data-section]");
       const field = section.querySelector("[data-field='signed_at']");
@@ -722,7 +717,13 @@ async def review_form_page() -> str:
         showInfo(body?.detail || "This review request has already been submitted.");
       }
     }
-    loadAuthState();
+    (async () => {
+      await loadAuthState();
+      loadReviewRequestIdFromQuery();
+      if (document.getElementById("reviewRequestId").value.trim()) {
+        await loadForm();
+      }
+    })();
   </script>
 </body>
 </html>
@@ -823,7 +824,7 @@ async def active_forms_admin_page() -> str:
         }).join("") || `<option value="${item.expected_form_version}">v${item.expected_form_version}</option>`;
         return `
           <tr data-request-id="${item.review_request_id}">
-            <td>${item.review_request_id}</td>
+            <td><a href="/dev/review-form?reviewRequestId=${item.review_request_id}">${item.review_request_id}</a></td>
             <td>${item.status}</td>
             <td>${item.reviewer_name || ""}<br>${item.reviewer_email || ""}</td>
             <td>${item.project_number || ""}<br>${item.project_name || ""}</td>
@@ -836,6 +837,9 @@ async def active_forms_admin_page() -> str:
               <div><button type="button" onclick="reloadVersions(this)">Load Versions</button></div>
               <div><select data-role="version-select">${versionOptions}</select></div>
               <div><button type="button" onclick="reassignTemplate(this)">Reassign</button></div>
+              <hr />
+              <div><input data-role="reviewer-email" value="${item.reviewer_email || ""}" placeholder="new reviewer email" /></div>
+              <div><button type="button" onclick="reassignReviewer(this)">Reassign Reviewer</button></div>
             </td>
           </tr>
         `;
@@ -852,7 +856,7 @@ async def active_forms_admin_page() -> str:
               <th>Template</th>
               <th>Disciplines</th>
               <th>Updated</th>
-              <th ${isAdmin ? "" : "style='display:none;'"} data-admin-col="true">Reassign</th>
+              <th ${isAdmin ? "" : "style='display:none;'"} data-admin-col="true">Admin Actions</th>
             </tr>
           </thead>
           <tbody>${rows.join("")}</tbody>
@@ -886,6 +890,26 @@ async def active_forms_admin_page() -> str:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template_key: templateKey, version })
+      });
+      show(body);
+      if (response.ok) {
+        await loadActiveRequests();
+      }
+    }
+    async function reassignReviewer(button) {
+      if (!isAdmin) {
+        return show({ detail: "Forbidden" });
+      }
+      const row = button.closest("tr");
+      const reviewRequestId = row.getAttribute("data-request-id");
+      const reviewerEmail = row.querySelector("[data-role='reviewer-email']").value.trim();
+      if (!reviewerEmail) {
+        return show({ detail: "Provide reviewer email" });
+      }
+      const { response, body } = await apiFetch(`/admin/review-requests/${reviewRequestId}/reassign-reviewer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewer_email: reviewerEmail })
       });
       show(body);
       if (response.ok) {

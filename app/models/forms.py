@@ -264,3 +264,27 @@ class ReassignTemplateVersionResponse(BaseModel):
     new_template_key: str
     new_version: int
     updated_at: datetime
+
+
+class ReassignReviewerRequest(BaseModel):
+    reviewer_contact_id: UUID | None = None
+    reviewer_email: str | None = None
+
+    @field_validator("reviewer_email")
+    @classmethod
+    def normalize_email(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class ReassignReviewerResponse(BaseModel):
+    review_request_id: UUID
+    old_reviewer_contact_id: UUID
+    old_reviewer_name: str | None = None
+    old_reviewer_email: str | None = None
+    new_reviewer_contact_id: UUID
+    new_reviewer_name: str | None = None
+    new_reviewer_email: str | None = None
+    updated_at: datetime

@@ -3,9 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+import asyncpg
 from fastapi import HTTPException
 
-from app.models.forms import ActiveReviewRequestItem, ReassignTemplateVersionResponse
+from app.models.forms import (
+    ActiveReviewRequestItem,
+    ReassignReviewerResponse,
+    ReassignTemplateVersionResponse,
+)
 
 if TYPE_CHECKING:
     import asyncpg
@@ -143,6 +148,41 @@ WHERE id = $1
 RETURNING id, updated_at;
 """
 
+GET_REVIEW_REQUEST_REVIEWER_SQL = """
+SELECT
+    rr.id AS review_request_id,
+    rr.reviewer_contact_id,
+    c.display_name AS reviewer_name,
+    c.email AS reviewer_email
+FROM qc_coversheet.review_request rr
+JOIN qc_coversheet.contact c
+    ON c.id = rr.reviewer_contact_id
+WHERE rr.id = $1;
+"""
+
+GET_CONTACT_BY_ID_SQL = """
+SELECT id, display_name, email
+FROM qc_coversheet.contact
+WHERE id = $1;
+"""
+
+GET_CONTACT_BY_EMAIL_SQL = """
+SELECT id, display_name, email
+FROM qc_coversheet.contact
+WHERE lower(email::text) = lower($1)
+ORDER BY updated_at DESC
+LIMIT 1;
+"""
+
+UPDATE_REVIEW_REQUEST_REVIEWER_SQL = """
+UPDATE qc_coversheet.review_request
+SET reviewer_contact_id = $2,
+    reviewer_name_used = $3,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, updated_at;
+"""
+
 
 class ReviewAdminService:
     _active_statuses = ["draft", "queued", "sent", "opened", "in_progress", "overdue"]
@@ -236,5 +276,55 @@ class ReviewAdminService:
             old_version=current["old_version"],
             new_template_key=target["template_key"],
             new_version=target["version"],
+            updated_at=updated["updated_at"],
+        )
+
+    async def reassign_review_request_reviewer(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        review_request_id: UUID,
+        reviewer_contact_id: UUID | None,
+        reviewer_email: str | None,
+    ) -> ReassignReviewerResponse:
+        if reviewer_contact_id is None and not reviewer_email:
+            raise HTTPException(status_code=400, detail="Provide reviewer_contact_id or reviewer_email")
+
+        async with conn.transaction():
+            current = await conn.fetchrow(GET_REVIEW_REQUEST_REVIEWER_SQL, review_request_id)
+            if current is None:
+                raise HTTPException(status_code=404, detail=f"Review request '{review_request_id}' not found")
+
+            if reviewer_contact_id is not None:
+                target = await conn.fetchrow(GET_CONTACT_BY_ID_SQL, reviewer_contact_id)
+            else:
+                target = await conn.fetchrow(GET_CONTACT_BY_EMAIL_SQL, reviewer_email)
+
+            if target is None:
+                raise HTTPException(status_code=404, detail="Target reviewer contact not found")
+
+            try:
+                updated = await conn.fetchrow(
+                    UPDATE_REVIEW_REQUEST_REVIEWER_SQL,
+                    review_request_id,
+                    target["id"],
+                    target["display_name"],
+                )
+            except asyncpg.UniqueViolationError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="A review request for this coversheet already exists for the selected reviewer",
+                ) from exc
+            if updated is None:
+                raise HTTPException(status_code=404, detail=f"Review request '{review_request_id}' not found")
+
+        return ReassignReviewerResponse(
+            review_request_id=review_request_id,
+            old_reviewer_contact_id=current["reviewer_contact_id"],
+            old_reviewer_name=current["reviewer_name"],
+            old_reviewer_email=current["reviewer_email"],
+            new_reviewer_contact_id=target["id"],
+            new_reviewer_name=target["display_name"],
+            new_reviewer_email=target["email"],
             updated_at=updated["updated_at"],
         )

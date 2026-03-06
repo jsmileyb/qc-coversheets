@@ -12,6 +12,8 @@ from app.auth.models import AuthenticatedUser
 from app.db import get_pool
 from app.models.forms import (
     ActiveReviewRequestItem,
+    ReassignReviewerRequest,
+    ReassignReviewerResponse,
     ReassignTemplateVersionRequest,
     ReassignTemplateVersionResponse,
 )
@@ -55,4 +57,24 @@ async def reassign_template_version(
             review_request_id=review_request_id,
             template_key=payload.template_key,
             version=payload.version,
+        )
+
+
+@router.post(
+    "/{review_request_id}/reassign-reviewer",
+    response_model=ReassignReviewerResponse,
+    dependencies=[Depends(require_admin_review_requests_write)],
+)
+async def reassign_reviewer(
+    review_request_id: UUID,
+    payload: ReassignReviewerRequest,
+    pool=Depends(get_pool),
+    service: ReviewAdminService = Depends(get_review_admin_service),
+) -> ReassignReviewerResponse:
+    async with pool.acquire() as conn:
+        return await service.reassign_review_request_reviewer(
+            conn,
+            review_request_id=review_request_id,
+            reviewer_contact_id=payload.reviewer_contact_id,
+            reviewer_email=payload.reviewer_email,
         )
