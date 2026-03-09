@@ -41,9 +41,9 @@ class Settings(BaseSettings):
     auth_redirect_uri_local: str = Field(default="http://localhost:8000/auth/callback")
     auth_redirect_uri_test: str = Field(default="https://test.example.com/auth/callback")
     auth_redirect_uri_prod: str = Field(default="https://app.example.com/auth/callback")
-    auth_logout_redirect_uri_local: str = Field(default="http://localhost:8000/dev/admin")
-    auth_logout_redirect_uri_test: str = Field(default="https://test.example.com")
-    auth_logout_redirect_uri_prod: str = Field(default="https://app.example.com")
+    auth_logout_redirect_uri_local: str = Field(default="http://localhost:8000/logged-out")
+    auth_logout_redirect_uri_test: str = Field(default="https://test.example.com/logged-out")
+    auth_logout_redirect_uri_prod: str = Field(default="https://app.example.com/logged-out")
     auth_login_success_redirect: str = Field(default="/dev/admin")
     auth_sync_entra_app_roles: bool = Field(default=True)
 

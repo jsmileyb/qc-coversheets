@@ -42,9 +42,7 @@ def store_user_session(request: Request, app_user_id: UUID) -> None:
 
 
 def clear_user_session(request: Request) -> None:
-    request.session.pop(SESSION_USER_ID_KEY, None)
-    request.session.pop(SESSION_AUTH_STATE_KEY, None)
-    request.session.pop(SESSION_AUTH_NONCE_KEY, None)
+    request.session.clear()
 
 
 def get_session_user_id(request: Request) -> UUID | None:

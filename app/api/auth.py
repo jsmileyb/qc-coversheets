@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.auth.dependencies import require_authenticated_user, resolve_optional_user
 from app.auth.models import AuthenticatedUser, MeResponse
@@ -112,6 +112,7 @@ async def auth_callback(
 @router.post("/auth/logout")
 async def auth_logout(
     request: Request,
+    settings: Settings = Depends(get_settings),
     user: AuthenticatedUser | None = Depends(resolve_optional_user),
     pool=Depends(get_pool),
     repo: AuthRepository = Depends(get_auth_repository),
@@ -128,7 +129,20 @@ async def auth_logout(
                 details={},
             )
     clear_user_session(request)
-    return {"status": "logged_out"}
+    accept = request.headers.get("accept", "")
+    dest = request.headers.get("sec-fetch-dest", "")
+    is_html = "text/html" in accept or dest == "document"
+    if is_html:
+        response = RedirectResponse(url="/logged-out", status_code=303)
+    else:
+        response = JSONResponse(content={"status": "logged_out", "redirect_to": "/logged-out"})
+    response.delete_cookie(
+        settings.session_cookie_name,
+        path="/",
+        samesite=settings.session_same_site,
+        secure=settings.session_https_only,
+    )
+    return response
 
 
 @router.get("/me", response_model=MeResponse)

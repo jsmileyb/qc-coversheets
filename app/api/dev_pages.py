@@ -7,12 +7,17 @@ from app.auth.dependencies import (
     require_admin_access,
     require_active_review_requests_read,
     require_admin_templates_read,
+    require_authenticated_user,
 )
 
 router = APIRouter(tags=["dev-pages"])
 
 
-@router.get("/dev/admin", response_class=HTMLResponse)
+@router.get(
+    "/dev/admin",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_authenticated_user)],
+)
 async def admin_landing_page() -> str:
     return """
 <!doctype html>
@@ -155,7 +160,7 @@ async def admin_landing_page() -> str:
     }
     async function logout() {
       await fetch("/auth/logout", { method: "POST" });
-      await refreshAuth();
+      window.location.href = "/logged-out";
     }
     async function bootstrapAdmin() {
       const response = await fetch("/auth/bootstrap-admin", { method: "POST" });
@@ -284,7 +289,7 @@ async def user_access_admin_page() -> str:
     }
     async function logout() {
       await fetch("/auth/logout", { method: "POST" });
-      window.location.href = "/dev/admin";
+      window.location.href = "/logged-out";
     }
     function renderRoleCheckboxes(currentRoles, appUserId) {
       return roleNames.map(role => {
@@ -646,7 +651,7 @@ async def admin_form_templates_page() -> str:
     }
     async function logout() {
       await fetch("/auth/logout", { method: "POST" });
-      await loadAuthState();
+      window.location.href = "/logged-out";
     }
     async function loadVersion(versionOverride = null) {
       clearBanners();
@@ -919,8 +924,7 @@ async def review_form_page() -> str:
     }
     async function logout() {
       await fetch("/auth/logout", { method: "POST" });
-      await loadAuthState();
-      setFormDisabled(true);
+      window.location.href = "/logged-out";
     }
     function hasPerm(key) {
       if (!me || !Array.isArray(me.permissions)) return false;
@@ -1222,7 +1226,7 @@ async def active_forms_admin_page() -> str:
     }
     async function logout() {
       await fetch("/auth/logout", { method: "POST" });
-      await loadAuthState();
+      window.location.href = "/logged-out";
     }
     async function getVersions(templateKey) {
       const { response, body } = await apiFetch(`/admin/form-templates/${encodeURIComponent(templateKey)}/versions`);
