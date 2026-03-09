@@ -1,3 +1,1 @@
-# QC Coversheets
-
 TBD
