@@ -29,6 +29,7 @@ async def admin_landing_page() -> str:
 </head>
 <body>
   <h1>Admin Landing (Dev)</h1>
+  <div id="welcomeLine" style="margin: 6px 0 18px; font-weight: 600;"></div>
   <div class="card" id="authCard">
     <h3>Authentication</h3>
     <div id="authState">Loading...</div>
@@ -73,6 +74,45 @@ async def admin_landing_page() -> str:
     const authHint = document.getElementById("authHint");
     const authCard = document.getElementById("authCard");
     const pendingCard = document.getElementById("pendingCard");
+    function isInternalEmail(email) {
+      return /@(greshamsmith\.com|gspnet\.com)$/i.test(email || "");
+    }
+    function extractFirstName(displayName, email) {
+      const rawName = (displayName || "").trim();
+      if (rawName) {
+        const namePart = rawName.includes(",")
+          ? rawName.split(",")[1]?.trim()
+          : rawName;
+        const token = (namePart || "").split(/\s+/)[0];
+        if (token) {
+          return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+        }
+      }
+      const local = (email || "").split("@")[0];
+      if (!local) return "";
+      const firstPart = local.split(".")[0];
+      if (!firstPart) return "";
+      const cleaned = firstPart.replace(/[_-]+/g, " ").trim();
+      if (!cleaned) return "";
+      const token = cleaned.split(" ")[0];
+      if (!token) return "";
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    }
+    function setWelcome(body) {
+      const welcome = document.getElementById("welcomeLine");
+      if (!welcome) return;
+      if (!body || body.auth_status !== "authenticated") {
+        welcome.textContent = "";
+        return;
+      }
+      const email = body.email || "";
+      if (isInternalEmail(email)) {
+        const first = extractFirstName(body.display_name, email);
+        welcome.textContent = first ? `Welcome, ${first}` : "Welcome";
+        return;
+      }
+      welcome.textContent = "Welcome";
+    }
     async function refreshAuth() {
       const response = await fetch("/me");
       const body = await response.json();
@@ -81,6 +121,7 @@ async def admin_landing_page() -> str:
         return;
       }
       authState.textContent = JSON.stringify(body, null, 2);
+      setWelcome(body);
       const cards = [...document.querySelectorAll(".protected-card")];
       const adminOnly = [...document.querySelectorAll(".admin-only")];
       const activeRequestsCard = document.querySelector(".active-requests-card");
@@ -150,35 +191,96 @@ async def user_access_admin_page() -> str:
     input, select, button { margin-right: 6px; margin-bottom: 4px; }
     .toolbar { margin-bottom: 12px; }
     pre { background: #f8f8f8; padding: 12px; white-space: pre-wrap; }
+    .result-error { color: #b42318; }
+    .banner { border-radius: 6px; padding: 10px 12px; margin: 12px 0; display: none; }
+    .banner-error { border: 1px solid #b42318; background: #fef3f2; color: #7a271a; }
   </style>
 </head>
 <body>
   <div style="margin-bottom:12px;">
-    <a href="/dev/admin">Admin Home</a> |
+    <a href="/dev/admin">Home</a> |
     <a href="/dev/user-access-admin">User Access Admin</a> |
     <a href="/dev/admin-form-templates">Template Manager</a> |
     <a href="/dev/active-forms-admin">Active Forms</a> |
     <a href="/dev/review-form">Reviewer Test Form</a> 
   </div>
   <h1>User Access Admin (Dev)</h1>
+  <div id="welcomeLine" style="margin: 6px 0 18px; font-weight: 600;"></div>
   <div class="toolbar">
     <button onclick="loadData()">Refresh</button>
     <a href="/auth/login">Login</a>
     <button type="button" onclick="logout()">Logout</button>
   </div>
+  <div id="errorBanner" class="banner banner-error"></div>
   <div id="tableWrap"></div>
   <h3>Result</h3>
   <pre id="result"></pre>
   <script>
     const result = document.getElementById("result");
+    const errorBanner = document.getElementById("errorBanner");
     let roleNames = [];
     function show(value) {
+      result.className = "";
       result.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      errorBanner.style.display = "none";
+      errorBanner.textContent = "";
+    }
+    function showError(value) {
+      result.className = "result-error";
+      result.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      errorBanner.textContent =
+        typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      errorBanner.style.display = "block";
     }
     async function apiFetch(url, options = null) {
       const response = await fetch(url, options || undefined);
       const body = await response.json();
       return { response, body };
+    }
+    function isInternalEmail(email) {
+      return /@(greshamsmith\.com|gspnet\.com)$/i.test(email || "");
+    }
+    function extractFirstName(displayName, email) {
+      const rawName = (displayName || "").trim();
+      if (rawName) {
+        const namePart = rawName.includes(",")
+          ? rawName.split(",")[1]?.trim()
+          : rawName;
+        const token = (namePart || "").split(/\s+/)[0];
+        if (token) {
+          return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+        }
+      }
+      const local = (email || "").split("@")[0];
+      if (!local) return "";
+      const firstPart = local.split(".")[0];
+      if (!firstPart) return "";
+      const cleaned = firstPart.replace(/[_-]+/g, " ").trim();
+      if (!cleaned) return "";
+      const token = cleaned.split(" ")[0];
+      if (!token) return "";
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    }
+    function setWelcome(body) {
+      const welcome = document.getElementById("welcomeLine");
+      if (!welcome) return;
+      if (!body || body.auth_status !== "authenticated") {
+        welcome.textContent = "";
+        return;
+      }
+      const email = body.email || "";
+      if (isInternalEmail(email)) {
+        const first = extractFirstName(body.display_name, email);
+        welcome.textContent = first ? `Welcome, ${first}` : "Welcome";
+        return;
+      }
+      welcome.textContent = "Welcome";
+    }
+    async function loadAuthAndWelcome() {
+      const { response, body } = await apiFetch("/me");
+      if (response.ok) {
+        setWelcome(body);
+      }
     }
     async function logout() {
       await fetch("/auth/logout", { method: "POST" });
@@ -192,11 +294,11 @@ async def user_access_admin_page() -> str:
     }
     async function loadData() {
       const rolesResp = await apiFetch("/admin/user-access/roles");
-      if (!rolesResp.response.ok) return show(rolesResp.body);
+      if (!rolesResp.response.ok) return showError(rolesResp.body);
       roleNames = (rolesResp.body || []).map(x => x.role_name);
 
       const usersResp = await apiFetch("/admin/user-access/users");
-      if (!usersResp.response.ok) return show(usersResp.body);
+      if (!usersResp.response.ok) return showError(usersResp.body);
       const users = usersResp.body || [];
       if (!users.length) {
         document.getElementById("tableWrap").innerHTML = "<div>No users found.</div>";
@@ -248,12 +350,18 @@ async def user_access_admin_page() -> str:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roles, is_active: isActive, is_approved: isApproved })
       });
-      show(body);
-      if (response.ok) {
-        await loadData();
+      if (!response.ok) {
+        const message = body && body.detail ? body.detail : body;
+        showError(message);
+        return;
       }
+      show(body);
+      await loadData();
     }
-    loadData();
+    (async () => {
+      await loadAuthAndWelcome();
+      await loadData();
+    })();
   </script>
 </body>
 </html>
@@ -280,11 +388,16 @@ async def admin_form_templates_page() -> str:
     .row { display: flex; gap: 12px; flex-wrap: wrap; }
     .card { border: 1px solid #ddd; padding: 12px; border-radius: 6px; }
     pre { background: #f8f8f8; padding: 12px; white-space: pre-wrap; }
+    .banner { border-radius: 6px; padding: 10px 12px; margin: 12px 0; display: none; }
+    .banner h3 { margin: 0 0 6px 0; font-size: 1rem; }
+    .banner ul { margin: 0; padding-left: 18px; }
+    .banner-success { border: 1px solid #0f766e; background: #ecfdf5; color: #115e59; }
+    .banner-error { border: 1px solid #b42318; background: #fef3f2; color: #7a271a; }
   </style>
 </head>
 <body>
   <div style="margin-bottom:12px;">
-    <a href="/dev/admin">Admin Home</a> |
+    <a href="/dev/admin">Home</a> |
     <a href="/dev/user-access-admin">User Access Admin</a> |
     <a href="/dev/admin-form-templates">Template Manager</a> |
     <a href="/dev/active-forms-admin">Active Forms</a> |
@@ -297,6 +410,9 @@ async def admin_form_templates_page() -> str:
     <button type="button" onclick="logout()">Logout</button>
   </div>
   <h1>Admin Form Template Editor (Dev)</h1>
+  <div id="welcomeLine" style="margin: 6px 0 18px; font-weight: 600;"></div>
+  <div id="successBanner" class="banner banner-success"></div>
+  <div id="errorBanner" class="banner banner-error"></div>
   <div class="row">
     <div class="card">
       <div><label>Template Key <input id="templateKey" value="qc_subconsultant_review" /></label></div>
@@ -310,10 +426,11 @@ async def admin_form_templates_page() -> str:
       <button onclick="loadVersion()">Load Version</button>
       <button onclick="listVersions()">List Versions</button>
       <button onclick="saveVersion()">Save New Version</button>
-      <button onclick="importTemplate()">Import JSON</button>
-      <button onclick="exportTemplate()">Export JSON</button>
+      <button onclick="importTemplate()">Import JSON File</button>
+      <button onclick="exportTemplate()">Export JSON File</button>
     </div>
   </div>
+  <input id="importFile" type="file" accept="application/json" style="display:none;" />
   <textarea id="jsonArea"></textarea>
   <h3>Result</h3>
   <pre id="result"></pre>
@@ -361,9 +478,31 @@ async def admin_form_templates_page() -> str:
     const area = document.getElementById("jsonArea");
     const versionSelect = document.getElementById("versionSelect");
     const authState = document.getElementById("authState");
+    const successBanner = document.getElementById("successBanner");
+    const errorBanner = document.getElementById("errorBanner");
+    const importFile = document.getElementById("importFile");
     area.value = JSON.stringify(starter, null, 2);
     function show(value) {
       result.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+    function clearBanners() {
+      successBanner.style.display = "none";
+      successBanner.textContent = "";
+      errorBanner.style.display = "none";
+      errorBanner.textContent = "";
+    }
+    function setBanner(target, title, lines) {
+      const list = Array.isArray(lines) && lines.length
+        ? `<ul>${lines.map(line => `<li>${line}</li>`).join("")}</ul>`
+        : "";
+      target.innerHTML = `<h3>${title}</h3>${list}`;
+      target.style.display = "block";
+    }
+    function showSuccess(title, lines) {
+      setBanner(successBanner, title, lines);
+    }
+    function showError(title, lines) {
+      setBanner(errorBanner, title, lines);
     }
     async function apiFetch(url, options = null) {
       const response = await fetch(url, options || undefined);
@@ -377,16 +516,140 @@ async def admin_form_templates_page() -> str:
       const body = await response.json();
       return { response, body };
     }
+    function isInternalEmail(email) {
+      return /@(greshamsmith\.com|gspnet\.com)$/i.test(email || "");
+    }
+    function extractFirstName(displayName, email) {
+      const rawName = (displayName || "").trim();
+      if (rawName) {
+        const namePart = rawName.includes(",")
+          ? rawName.split(",")[1]?.trim()
+          : rawName;
+        const token = (namePart || "").split(/\s+/)[0];
+        if (token) {
+          return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+        }
+      }
+      const local = (email || "").split("@")[0];
+      if (!local) return "";
+      const firstPart = local.split(".")[0];
+      if (!firstPart) return "";
+      const cleaned = firstPart.replace(/[_-]+/g, " ").trim();
+      if (!cleaned) return "";
+      const token = cleaned.split(" ")[0];
+      if (!token) return "";
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    }
+    function setWelcome(body) {
+      const welcome = document.getElementById("welcomeLine");
+      if (!welcome) return;
+      if (!body || body.auth_status !== "authenticated") {
+        welcome.textContent = "";
+        return;
+      }
+      const email = body.email || "";
+      if (isInternalEmail(email)) {
+        const first = extractFirstName(body.display_name, email);
+        welcome.textContent = first ? `Welcome, ${first}` : "Welcome";
+        return;
+      }
+      welcome.textContent = "Welcome";
+    }
+    function parseJson(input) {
+      try {
+        return { value: JSON.parse(input), error: null };
+      } catch (err) {
+        return { value: null, error: err };
+      }
+    }
+    function validateTemplatePayload(payload) {
+      const errors = [];
+      if (!payload || typeof payload !== "object") {
+        errors.push("Root JSON must be an object with a schema_json property.");
+        return errors;
+      }
+      const schema = payload.schema_json;
+      if (!schema || typeof schema !== "object") {
+        errors.push("schema_json must be an object.");
+        return errors;
+      }
+      if (!schema.schema_version || typeof schema.schema_version !== "string") {
+        errors.push("schema_json.schema_version must be a string.");
+      }
+      if (!schema.template_key || typeof schema.template_key !== "string") {
+        errors.push("schema_json.template_key must be a non-empty string.");
+      }
+      if (!schema.display_name || typeof schema.display_name !== "string") {
+        errors.push("schema_json.display_name must be a non-empty string.");
+      }
+      if (!schema.branding || typeof schema.branding !== "object") {
+        errors.push("schema_json.branding must be an object with org_name.");
+      } else if (!schema.branding.org_name || typeof schema.branding.org_name !== "string") {
+        errors.push("schema_json.branding.org_name must be a non-empty string.");
+      }
+      if (!Array.isArray(schema.auto_fields) || schema.auto_fields.length === 0) {
+        errors.push("schema_json.auto_fields must be a non-empty array.");
+      } else {
+        const unique = new Set(schema.auto_fields);
+        if (unique.size !== schema.auto_fields.length) {
+          errors.push("schema_json.auto_fields must not contain duplicate values.");
+        }
+      }
+      const repeat = schema.discipline_repeat;
+      if (!repeat || typeof repeat !== "object") {
+        errors.push("schema_json.discipline_repeat must be an object.");
+      } else if (!Array.isArray(repeat.items) || repeat.items.length === 0) {
+        errors.push("schema_json.discipline_repeat.items must include at least one section.");
+      } else {
+        const keys = repeat.items.map(item => item?.section_key).filter(Boolean);
+        if (keys.length !== repeat.items.length) {
+          errors.push("Each discipline_repeat item must have a section_key.");
+        } else if (new Set(keys).size !== keys.length) {
+          errors.push("discipline_repeat.items must not contain duplicate section_key values.");
+        }
+        repeat.items.forEach((item, index) => {
+          if (!item.section_label || typeof item.section_label !== "string") {
+            errors.push(`discipline_repeat.items[${index}].section_label must be a non-empty string.`);
+          }
+          if (!item.choice || typeof item.choice !== "object") {
+            errors.push(`discipline_repeat.items[${index}].choice must be an object.`);
+          } else {
+            if (item.choice.type && item.choice.type !== "single_select") {
+              errors.push(`discipline_repeat.items[${index}].choice.type must be "single_select".`);
+            }
+            if (item.choice.options) {
+              const options = Array.isArray(item.choice.options) ? item.choice.options : [];
+              const optionSet = new Set(options);
+              if (optionSet.size !== 2 || !optionSet.has("complete") || !optionSet.has("na")) {
+                errors.push(`discipline_repeat.items[${index}].choice.options must contain "complete" and "na".`);
+              }
+            }
+          }
+          if (item.signature && item.signature.match_mode && item.signature.match_mode !== "case_insensitive_exact") {
+            errors.push(`discipline_repeat.items[${index}].signature.match_mode must be "case_insensitive_exact".`);
+          }
+          if (item.notes && item.notes.max_length !== undefined) {
+            const maxLength = Number(item.notes.max_length);
+            if (!Number.isFinite(maxLength) || maxLength <= 0) {
+              errors.push(`discipline_repeat.items[${index}].notes.max_length must be a positive number.`);
+            }
+          }
+        });
+      }
+      return errors;
+    }
     async function loadAuthState() {
       const { response, body } = await apiFetch("/me");
       if (!response.ok) return;
       authState.textContent = JSON.stringify(body, null, 2);
+      setWelcome(body);
     }
     async function logout() {
       await fetch("/auth/logout", { method: "POST" });
       await loadAuthState();
     }
     async function loadVersion(versionOverride = null) {
+      clearBanners();
       const key = document.getElementById("templateKey").value.trim();
       const version = versionOverride ?? versionSelect.value;
       versionSelect.value = String(version);
@@ -396,6 +659,7 @@ async def admin_form_templates_page() -> str:
       show(body);
     }
     async function listVersions() {
+      clearBanners();
       const key = document.getElementById("templateKey").value.trim();
       const { response, body } = await apiFetch(`/admin/form-templates/${encodeURIComponent(key)}/versions`);
       if (!response.ok) {
@@ -423,9 +687,22 @@ async def admin_form_templates_page() -> str:
       }
     }
     async function saveVersion() {
+      clearBanners();
       const key = document.getElementById("templateKey").value.trim();
-      const payload = JSON.parse(area.value);
-      const { response, body } = await apiFetch(`/admin/form-templates/${encodeURIComponent(key)}/versions`, {
+      const parsed = parseJson(area.value);
+      if (parsed.error) {
+        showError("Save failed", ["Editor JSON is invalid.", "Fix the JSON syntax and try again."]);
+        return;
+      }
+      const validationErrors = validateTemplatePayload(parsed.value);
+      if (validationErrors.length) {
+        showError("Save failed", validationErrors.concat(["Fix the schema issues above before saving."]));
+        return;
+      }
+      await savePayloadAsVersion(parsed.value, key, "Save successful");
+    }
+    async function savePayloadAsVersion(payload, templateKey, successTitle) {
+      const { response, body } = await apiFetch(`/admin/form-templates/${encodeURIComponent(templateKey)}/versions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -434,29 +711,94 @@ async def admin_form_templates_page() -> str:
       if (response.ok && body?.version?.version) {
         await listVersions();
         versionSelect.value = String(body.version.version);
+        showSuccess(successTitle, [`Saved template ${body.template.template_key} v${body.version.version}.`]);
+        return true;
       }
+      showError("Save failed", ["Review the API response below."]);
+      return false;
     }
     async function importTemplate() {
-      const payload = JSON.parse(area.value);
-      const { response, body } = await apiFetch("/admin/form-templates/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      show(body);
-      if (response.ok && body?.template?.template_key && body?.version?.version) {
-        document.getElementById("templateKey").value = body.template.template_key;
-        await listVersions();
-        versionSelect.value = String(body.version.version);
-      }
+      clearBanners();
+      importFile.value = "";
+      importFile.click();
     }
     async function exportTemplate() {
-      const key = document.getElementById("templateKey").value.trim();
-      const version = versionSelect.value;
-      const { response, body } = await apiFetch(`/admin/form-templates/${encodeURIComponent(key)}/versions/${version}/export`);
-      show(body);
-      area.value = JSON.stringify(body, null, 2);
+      clearBanners();
+      const parsed = parseJson(area.value);
+      if (parsed.error) {
+        showError("Export failed", ["Editor JSON is invalid.", "Fix the JSON syntax and try again."]);
+        return;
+      }
+      const validationErrors = validateTemplatePayload(parsed.value);
+      if (validationErrors.length) {
+        showError("Export failed", validationErrors.concat(["Fix the schema issues above before exporting."]));
+        return;
+      }
+      const schema = parsed.value.schema_json || {};
+      const fileName = `${schema.template_key || "template"}-schema.json`;
+      const jsonText = JSON.stringify(parsed.value, null, 2);
+      const blob = new Blob([jsonText], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      showSuccess("Export successful", [`Downloaded ${fileName}.`]);
     }
+    importFile.addEventListener("change", async (event) => {
+      clearBanners();
+      const file = event.target.files && event.target.files[0];
+      if (!file) {
+        showError("Import failed", ["No file selected."]);
+        return;
+      }
+      let text = "";
+      try {
+        text = await file.text();
+      } catch (err) {
+        showError("Import failed", ["Could not read the selected file."]);
+        return;
+      }
+      const parsed = parseJson(text);
+      if (parsed.error) {
+        showError("Import failed", ["File contents are not valid JSON.", "Fix the JSON file and re-import."]);
+        return;
+      }
+      const validationErrors = validateTemplatePayload(parsed.value);
+      if (validationErrors.length) {
+        showError("Import failed", validationErrors.concat(["Fix the schema issues in the JSON file and try again."]));
+        return;
+      }
+      const schema = parsed.value.schema_json || {};
+      const sectionCount = Array.isArray(schema.discipline_repeat?.items)
+        ? schema.discipline_repeat.items.length
+        : 0;
+      const confirmMessage = `Load schema "${schema.display_name}" (key: ${schema.template_key}) with ${sectionCount} sections?`;
+      if (!window.confirm(confirmMessage)) {
+        showError("Import cancelled", ["No changes were made."]);
+        return;
+      }
+      area.value = JSON.stringify(parsed.value, null, 2);
+      if (schema.template_key) {
+        document.getElementById("templateKey").value = schema.template_key;
+      }
+      showSuccess("Import successful", [`Loaded ${file.name}.`]);
+      show({ status: "imported", file: file.name, template_key: schema.template_key || null });
+      const publishMessage = `Make this imported schema the new active version for "${schema.template_key}"?`;
+      if (!window.confirm(publishMessage)) {
+        return;
+      }
+      const publishOk = await savePayloadAsVersion(parsed.value, schema.template_key || document.getElementById("templateKey").value.trim(), "Import published");
+      if (!publishOk) {
+        showError("Publish failed", [
+          "The imported schema was loaded, but it was not versioned.",
+          "Review the API response and fix any validation issues, then try saving again."
+        ]);
+      }
+    });
     loadAuthState();
     listVersions();
   </script>
@@ -494,13 +836,14 @@ async def review_form_page() -> str:
 </head>
 <body>
   <div style="margin-bottom:12px;">
-    <a href="/dev/admin">Admin Home</a> |
+    <a href="/dev/admin">Home</a> |
     <a href="/dev/user-access-admin">User Access Admin</a> |
     <a href="/dev/admin-form-templates">Template Manager</a> |
     <a href="/dev/active-forms-admin">Active Forms</a> |
     <a href="/dev/review-form">Reviewer Test Form</a> 
   </div>
   <h1>Reviewer Form (Dev)</h1>
+  <div id="welcomeLine" style="margin: 6px 0 18px; font-weight: 600;"></div>
   <div class="card">
     <strong>Auth State:</strong>
     <pre id="authState" style="margin-top:8px;">Loading...</pre>
@@ -522,6 +865,45 @@ async def review_form_page() -> str:
     let context = null;
     let me = null;
     let sectionLabelToKey = new Map();
+    function isInternalEmail(email) {
+      return /@(greshamsmith\.com|gspnet\.com)$/i.test(email || "");
+    }
+    function extractFirstName(displayName, email) {
+      const rawName = (displayName || "").trim();
+      if (rawName) {
+        const namePart = rawName.includes(",")
+          ? rawName.split(",")[1]?.trim()
+          : rawName;
+        const token = (namePart || "").split(/\s+/)[0];
+        if (token) {
+          return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+        }
+      }
+      const local = (email || "").split("@")[0];
+      if (!local) return "";
+      const firstPart = local.split(".")[0];
+      if (!firstPart) return "";
+      const cleaned = firstPart.replace(/[_-]+/g, " ").trim();
+      if (!cleaned) return "";
+      const token = cleaned.split(" ")[0];
+      if (!token) return "";
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    }
+    function setWelcome(body) {
+      const welcome = document.getElementById("welcomeLine");
+      if (!welcome) return;
+      if (!body || body.auth_status !== "authenticated") {
+        welcome.textContent = "";
+        return;
+      }
+      const email = body.email || "";
+      if (isInternalEmail(email)) {
+        const first = extractFirstName(body.display_name, email);
+        welcome.textContent = first ? `Welcome, ${first}` : "Welcome";
+        return;
+      }
+      welcome.textContent = "Welcome";
+    }
     function show(value) {
       document.getElementById("result").textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
     }
@@ -530,6 +912,7 @@ async def review_form_page() -> str:
       const body = await response.json();
       document.getElementById("authState").textContent = JSON.stringify(body, null, 2);
       me = body;
+      setWelcome(body);
       if (body.effective_access_state !== "active") {
         setFormDisabled(true);
       }
@@ -755,7 +1138,7 @@ async def active_forms_admin_page() -> str:
 </head>
 <body>
   <div style="margin-bottom:12px;">
-    <a href="/dev/admin">Admin Home</a> |
+    <a href="/dev/admin">Home</a> |
     <a href="/dev/user-access-admin">User Access Admin</a> |
     <a href="/dev/admin-form-templates">Template Manager</a> |
     <a href="/dev/active-forms-admin">Active Forms</a> |
@@ -768,6 +1151,7 @@ async def active_forms_admin_page() -> str:
     <button type="button" onclick="logout()">Logout</button>
   </div>
   <h1>Active Review Requests (Dev Admin)</h1>
+  <div id="welcomeLine" style="margin: 6px 0 18px; font-weight: 600;"></div>
   <div class="toolbar">
     <button onclick="loadActiveRequests()">Refresh Active Requests</button>
   </div>
@@ -778,6 +1162,45 @@ async def active_forms_admin_page() -> str:
     const result = document.getElementById("result");
     const authState = document.getElementById("authState");
     let isAdmin = false;
+    function isInternalEmail(email) {
+      return /@(greshamsmith\.com|gspnet\.com)$/i.test(email || "");
+    }
+    function extractFirstName(displayName, email) {
+      const rawName = (displayName || "").trim();
+      if (rawName) {
+        const namePart = rawName.includes(",")
+          ? rawName.split(",")[1]?.trim()
+          : rawName;
+        const token = (namePart || "").split(/\s+/)[0];
+        if (token) {
+          return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+        }
+      }
+      const local = (email || "").split("@")[0];
+      if (!local) return "";
+      const firstPart = local.split(".")[0];
+      if (!firstPart) return "";
+      const cleaned = firstPart.replace(/[_-]+/g, " ").trim();
+      if (!cleaned) return "";
+      const token = cleaned.split(" ")[0];
+      if (!token) return "";
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    }
+    function setWelcome(body) {
+      const welcome = document.getElementById("welcomeLine");
+      if (!welcome) return;
+      if (!body || body.auth_status !== "authenticated") {
+        welcome.textContent = "";
+        return;
+      }
+      const email = body.email || "";
+      if (isInternalEmail(email)) {
+        const first = extractFirstName(body.display_name, email);
+        welcome.textContent = first ? `Welcome, ${first}` : "Welcome";
+        return;
+      }
+      welcome.textContent = "Welcome";
+    }
     function show(value) {
       result.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
     }
@@ -793,6 +1216,7 @@ async def active_forms_admin_page() -> str:
       const { response, body } = await apiFetch("/me");
       if (!response.ok) return;
       authState.textContent = JSON.stringify(body, null, 2);
+      setWelcome(body);
       const perms = Array.isArray(body.permissions) ? body.permissions : [];
       isAdmin = perms.includes("admin.access");
     }

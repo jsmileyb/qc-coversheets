@@ -253,6 +253,14 @@ class AuthRepository:
             user.permissions = []
         return user
 
+    async def get_app_user_email(
+        self, conn: asyncpg.Connection, *, app_user_id: UUID
+    ) -> str | None:
+        row = await conn.fetchrow(GET_USER_BASE_SQL, app_user_id)
+        if row is None:
+            return None
+        return row["email"]
+
     async def log_session_event(
         self,
         conn: asyncpg.Connection,

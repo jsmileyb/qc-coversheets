@@ -6,6 +6,11 @@ apps_process
 postgresql/.archive
 postgresql/migrations/queries/db_exports/*.csv
 
+# db Backup files
+db_backups/*
+!db_backups/
+!db_backups/**/*.md
+
 # Environment files
 .env
 .env.*
