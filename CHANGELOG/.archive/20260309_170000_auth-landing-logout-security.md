@@ -1,6 +1,7 @@
 # Project Update
 
 ## Summary
+
 Added a public landing page and a logged-out confirmation page, strengthened logout/session clearing, and tightened auth protection for HTML routes.
 
 ## Added
@@ -8,7 +9,7 @@ Added a public landing page and a logged-out confirmation page, strengthened log
 - Public landing page at `/` with a Sign In button.
 - Logged-out confirmation page at `/logged-out`.
 
-## Updated 
+## Updated
 
 - Logout now clears full session state and deletes the session cookie.
 - HTML navigation requests that hit protected routes redirect to the landing page.
@@ -18,3 +19,11 @@ Added a public landing page and a logged-out confirmation page, strengthened log
 ## Fixed
 
 - Prevented re-entering protected pages after logout without re-authentication.
+
+## Known Issues
+
+- No known issues were listed in the provided change logs.
+
+## Contributors
+
+- Smiley Baltz
